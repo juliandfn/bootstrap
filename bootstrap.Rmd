@@ -1,0 +1,208 @@
+---
+title: "ISL Problem Set 7"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+### 1. Sampling distribution of the median
+
+#### a) Simulation experiment to estimate the sampling distribution of the median.
+
+Let the samples sizes be $n = \{100, 200, 400, 800\}$ and consider the random sample $W_1,W_2, . . . ,W_n \sim \chi^2(1)$. Suppose that the median,
+$$\tilde{w} = median\{W_1, . . . ,W_n\},$$
+is the parameter of interest. Illustrate the kernel density of the sampling distribution of the median based on $B=500$ random samples, each independently drawn under the distributional assumption. Report and discuss the results for the different sample sizes.
+
+```{r}
+# Probability density function
+curve(dchisq(x, df = 1), from = 0, to = 8,
+      main = 'Chi-Square Distribution (df = 1)',
+      ylab = 'Density', 
+      lwd = 2, 
+      col = 'blue')
+
+```
+
+```{r}
+n <- c(100, 200, 400, 800)
+B <- 500
+set.seed(123)
+
+# Compute the medians for all n
+medians <- lapply(n, function(n_i) {
+  replicate(B, median(rchisq(n_i, df = 1)))
+})
+
+# Convert list of medians to data frame
+medians_df <- data.frame(median = unlist(medians),
+                         sample_size = rep(n, each = B))
+
+# Plot density of median for each sample size
+library(ggplot2)
+
+ggplot(medians_df, aes(x = median, fill = as.factor(sample_size))) +
+  geom_density(alpha = 0.5) +
+  scale_fill_discrete(name = "Sample size") +
+  labs(x = "Median", y = "Density") +
+  theme_classic()
+
+```
+
+Instead of using a loop, like in the next block, one can use the base R function 'lapply' to directly apply a function to a list or a vector.
+
+
+```{r}
+save.a <- matrix(nrow = B, ncol = length(n))
+
+for(i in 1:length(n)) {
+
+  set.seed(123)
+  nobs <- n[i]
+
+  for(j in 1:B){
+    W <-  rchisq(nobs, df = 1)
+    med <-median(W)
+    save.a[j,i] <- med
+  }
+}
+
+d.a <- data.frame(dens = c(save.a[,1], save.a[,2], save.a[,3], save.a[,4]),
+                  N = rep(c("100", "200","400","800"), each = 500))
+
+ggplot(d.a, aes(x = dens, fill = N)) + geom_density(alpha = 0.5)+
+  labs(x = "Median", y = "Density") +
+  theme_classic()  +theme(legend.position=c(0.8, 0.7)) +
+  scale_fill_discrete(name = "Sample size")
+
+```
+```{r}
+cat("Mean of estimated medians with increasing sample sizes:", round(apply(save.a,2,mean),5),"\n")
+cat("Standard deviation of the estimated medians with increasing sample sizes:", round(apply(save.a,2,sd),3),"\n")
+```
+
+We see that as the sample size grows, the standard deviation of the estimated bootstrap medians decreases, as represented by the distribution thinning towards the mode. This comes from the fact that with lower sample sizes, the samples might be skewed representations of the distribution because of not enough observations. With growing sample sizes, the median estimates becomes more precise.
+
+#### (b) Empirical Bootstrap
+
+Now consider the random sample $X_1,X_2, . . . ,X_n \sim F$, where $F$ is some unknown distribution. The data is provided in *bs.csv*. Estimate the sample median, $\tilde{x}$, and report uncertainty measures of $\tilde{x}$ by resampling with replacement from the data at hand.
+
+```{r}
+data <- read.csv("bs.csv", header = TRUE)
+data <- as.numeric(unlist(data))
+
+R <- 500
+empboot <- vector(length = R)     # empty vector to store
+
+set.seed(123)
+
+for(i in 1:R){
+  re <-  sample(data, replace = TRUE)     # resample data with replacement
+  med <-median(re)      # calculate median
+  empboot[i] <- med
+}
+
+
+cat("Sample median:", median(data),"\n")
+cat("Mean of bootstrap medians:", mean(empboot),"\n")
+cat("Standard deviation of bootstrap medians:", sd(empboot), "\n")
+
+
+```
+
+
+### 2. Bootstrap estimation of standard errors
+
+Here we use the bootstrap approach in order to assess the sampling variation of regression coefficients. We use the *Default* data set.
+
+#### a)
+
+For the logistic regression model that classifies the Default variable by using the quantitative variables, we aim to obtain bootstrap standard errors for the corresponding model coefficients. You can proceed as follows:
+
+* Write a function, *boot.fn()*, that takes as input the *Default* data set as well as an index of the observations, and that outputs the coefficient estimates for *income* and *balance*
+* Use the *boot()* function together with your *boot.fn()* function to estimate the standard errors of the logistic regression coefficients *income* and *balance*
+
+
+```{r}
+library(ISLR)
+library(boot)
+
+head(Default)
+
+# logit fit
+r <- glm(default ~ balance + income, family = binomial(link = 'logit'),
+            data=Default)
+summary(r)
+```
+
+```{r}
+
+# Define the boot.fn() function
+boot.fn <- function(data,index) {
+
+  d <- data[index,]
+  r <- glm(default ~ balance + income, family = binomial(link = 'logit'),
+           data=d)
+
+  return(r$coefficients[2:3])
+}
+
+set.seed(123)
+boot.out <- boot(data = Default, statistic = boot.fn, R = 200)
+boot.out
+
+head(boot.out$t)
+
+# Standard errors
+boot.se <- apply(boot.out$t, 2, sd)
+round(boot.se,8)
+
+```
+#### (b)
+Comment on the estimated standard errors obtained using the *glm()* function and using the bootstrap function. In which situation might the bootstrap estimation of standard errors be a better alternative?
+
+```{r}
+se.glm <- summary(r)$coefficients[2:3,2]
+print(round(se.glm,6))
+```
+
+The variance covariance matrix estimation of logit/ML relying on asymptotic approximations, based on first-order asymptotic theory, might only yield rather inaccurate approximations for the limiting distribution of the test statistic.
+
+For small sample sizes, bootstrap can achieves more accurate estimates, for example for standard errors, than estimates using the asymptotic approximation.
+
+#### More Replications
+
+```{r}
+set.seed(123)
+boot.out <- boot(data = Default, statistic = boot.fn, R = 500)
+boot.se <- apply(boot.out$t, 2, sd)
+round(boot.se,8)
+```
+#### Other way to get Bootstrap Standard Errors
+
+```{r}
+
+G <-200     # replications
+
+glm.boot <- list()      # to store
+
+ind <- 1:nrow(Default)      # to draw indexes
+
+set.seed(123)
+for(i in 1:G) {
+  id <- sample(ind, replace = TRUE)
+  r <- glm(default ~ balance + income, family = binomial(link = 'logit'),
+           data=Default[id,])
+  glm.boot[[i]] <- r$coefficients[2:3]
+}
+
+
+glm.output <- do.call(rbind, glm.boot)
+head((glm.output))
+
+round(apply(glm.output, 2, sd),8)
+
+```
+
+
+
